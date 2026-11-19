@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -181,8 +182,14 @@ func validarLogin(user string, pass string, permitidos []string, rutaDB string) 
 
 func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
 	writerS := bufio.NewWriter(*socketS)
-	// Lista sencilla de comandos prohibidos
-	prohibidos := []string{"rm", "rmdir", "shutdown", "reboot", "poweroff", "mkfs", "dd", "sudo", "su", "chmod", "chown"}
+	// Agregamos nano, vim, vi, top, htop, less, more para que no congelen la sesión
+	prohibidos := []string{"rm", "rmdir", "shutdown", "reboot", "poweroff", "mkfs", "dd", "sudo", "su", "chmod", "chown", "nano", "vim", "vi", "top", "htop", "less", "more"}
+
+	// Directorio inicial de la sesión (para que funcione el comando cd)
+	dirActual, err := os.Getwd()
+	if err != nil {
+		dirActual = "/home/mramirez"
+	}
 
 	for {
 		msjRec, err := bufferS.ReadString('\n')
@@ -197,31 +204,61 @@ func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
 			salir <- true
 			return
 		}
-		// Revisar si la primera palabra del comando está en la lista negra
+
+		// Revisar lista negra (incluyendo si encadenan comandos con ; o && o |)
 		bloqueado := false
-		palabras := strings.Fields(comando)
-		if len(palabras) > 0 {
+		limpio := strings.NewReplacer(";", " ", "&&", " ", "|", " ").Replace(comando)
+		palabras := strings.Fields(limpio)
+		for _, pal := range palabras {
 			for _, p := range prohibidos {
-				if palabras[0] == p {
+				if pal == p {
 					bloqueado = true
 					break
 				}
 			}
 		}
+
 		if bloqueado {
 			fmt.Println("Comando bloqueado:", comando)
 			registrarLog("COMANDO BLOQUEADO: " + comando)
-			writerS.WriteString("CMD|Error: Comando no permitido por seguridad\n")
+			writerS.WriteString("CMD|Error: Comando no permitido por seguridad o requiere terminal interactiva\n")
+			writerS.Flush()
+			continue
+		}
+
+		// Manejo sencillo del comando cd para navegar entre carpetas
+		if comando == "cd" || strings.HasPrefix(comando, "cd ") {
+			ruta := strings.TrimSpace(strings.TrimPrefix(comando, "cd"))
+			if ruta == "" || ruta == "~" {
+				ruta = "/home/mramirez"
+			} else if !filepath.IsAbs(ruta) {
+				ruta = filepath.Join(dirActual, ruta)
+			}
+			ruta = filepath.Clean(ruta) // Limpia los ".." y barras dobles "//"
+
+			info, err := os.Stat(ruta)
+			if err == nil && info.IsDir() {
+				dirActual = ruta
+				registrarLog("Cambio de directorio a: " + dirActual)
+				writerS.WriteString("CMD|Directorio actual: " + dirActual + "\n")
+			} else {
+				writerS.WriteString("CMD|Error: No existe el directorio\n")
+			}
 			writerS.Flush()
 			continue
 		}
 		registrarLog("Comando ejecutado: " + comando)
 		shell := exec.Command("bash", "-c", comando)
+		shell.Dir = dirActual // Ejecuta el comando en la carpeta donde estés ubicado
 		salida, _ := shell.CombinedOutput()
 
 		texto := strings.TrimSpace(string(salida))
 		if texto == "" {
 			texto = "(Comando ejecutado sin salida)"
+		}
+		// Evitar congelar la interfaz gráfica si la salida es gigante (ej. cat a un binario)
+		if len(texto) > 2000 {
+			texto = texto[:2000] + "\n... [Salida recortada]"
 		}
 		texto = strings.ReplaceAll(texto, "\n", " | ")
 
