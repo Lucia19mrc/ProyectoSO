@@ -19,7 +19,6 @@ func main() {
 	fmt.Println("*******************************")
 	registrarLog("=== INICIANDO SERVER DEBIAN ===")
 
-	// 1. Leer configuración desde /etc/configProyecto.conf
 	ipPermitida, puerto, maxintentos, usuariospermitidos, archivousuaris := leerConfig("/etc/configProyecto.conf")
 
 	dirTCP, _ := net.ResolveTCPAddr("tcp4", ":"+puerto)
@@ -32,7 +31,6 @@ func main() {
 	}
 	defer oyente.Close()
 
-	// 2. Bucle infinito para que el servicio systemd siga escuchando después de cada cliente
 	for {
 		fmt.Println("Esperando conexiones en el puerto", puerto, "...")
 		socketS, err := oyente.Accept()
@@ -103,7 +101,6 @@ func main() {
 	}
 }
 
-// 4. Función sencilla para guardar eventos en archivo de log
 func registrarLog(mensaje string) {
 	f, err := os.OpenFile("/var/log/proyectoOper/actividad.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -144,7 +141,6 @@ func leerConfig(nombreArchivo string) (string, string, int, []string, string) {
 	return ip, puerto, maxintentos, Usuaio, archivousuaris
 }
 
-// 3. Validación SHA-512 con salt (formato en oper.users.db -> usuario:salt:hash)
 func validarLogin(user string, pass string, permitidos []string, rutaDB string) bool {
 	estaenConf := false
 	for _, u := range permitidos {
@@ -182,10 +178,10 @@ func validarLogin(user string, pass string, permitidos []string, rutaDB string) 
 
 func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
 	writerS := bufio.NewWriter(*socketS)
-	// Agregamos nano, vim, vi, top, htop, less, more para que no congelen la sesión
-	prohibidos := []string{"rm", "rmdir", "shutdown", "reboot", "poweroff", "mkfs", "dd", "sudo", "su", "chmod", "chown", "nano", "vim", "vi", "top", "htop", "less", "more"}
-
-	// Directorio inicial de la sesión (para que funcione el comando cd)
+	prohibidos := []string{
+		"rm", "rmdir", "shutdown", "reboot", "poweroff", "halt", "mkfs", "dd", "sudo", "su", "passwd", "chmod", "chown", "kill", "pkill", "killall", "mv", "cp", "truncate", "shred", "tee",
+		"wget", "curl", "nc", "ncat", "ssh", "nano", "vim", "vi", "top", "htop", "less", "more",
+	}
 	dirActual, err := os.Getwd()
 	if err != nil {
 		dirActual = "/home/mramirez"
@@ -205,7 +201,6 @@ func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
 			return
 		}
 
-		// Revisar lista negra (incluyendo si encadenan comandos con ; o && o |)
 		bloqueado := false
 		limpio := strings.NewReplacer(";", " ", "&&", " ", "|", " ").Replace(comando)
 		palabras := strings.Fields(limpio)
@@ -217,7 +212,6 @@ func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
 				}
 			}
 		}
-
 		if bloqueado {
 			fmt.Println("Comando bloqueado:", comando)
 			registrarLog("COMANDO BLOQUEADO: " + comando)
@@ -226,7 +220,6 @@ func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
 			continue
 		}
 
-		// Manejo sencillo del comando cd para navegar entre carpetas
 		if comando == "cd" || strings.HasPrefix(comando, "cd ") {
 			ruta := strings.TrimSpace(strings.TrimPrefix(comando, "cd"))
 			if ruta == "" || ruta == "~" {
@@ -234,7 +227,7 @@ func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
 			} else if !filepath.IsAbs(ruta) {
 				ruta = filepath.Join(dirActual, ruta)
 			}
-			ruta = filepath.Clean(ruta) // Limpia los ".." y barras dobles "//"
+			ruta = filepath.Clean(ruta)
 
 			info, err := os.Stat(ruta)
 			if err == nil && info.IsDir() {
@@ -249,14 +242,13 @@ func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
 		}
 		registrarLog("Comando ejecutado: " + comando)
 		shell := exec.Command("bash", "-c", comando)
-		shell.Dir = dirActual // Ejecuta el comando en la carpeta donde estés ubicado
+		shell.Dir = dirActual
 		salida, _ := shell.CombinedOutput()
 
 		texto := strings.TrimSpace(string(salida))
 		if texto == "" {
 			texto = "(Comando ejecutado sin salida)"
 		}
-		// Evitar congelar la interfaz gráfica si la salida es gigante (ej. cat a un binario)
 		if len(texto) > 2000 {
 			texto = texto[:2000] + "\n... [Salida recortada]"
 		}
@@ -277,7 +269,6 @@ func envReporteS(socketS *net.Conn, periodo int, salir chan bool) {
 			time.Sleep(time.Duration(periodo) * time.Second)
 			num++
 
-			//reporte del sistema
 			cpu := ejecutarShell("top -bn1 | grep 'Cpu' | awk '{print 100 - $8\"%\"}'")
 			ram := ejecutarShell("free -m | awk 'NR==2{printf \"%s/%sMB (%.1f%%)\", $3,$2,$3*100/$2}'")
 			disco := ejecutarShell("df -h / | awk 'NR==2{printf \"%s/%s (%s)\", $3,$2,$5}'")
