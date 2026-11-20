@@ -212,6 +212,7 @@ func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
 				}
 			}
 		}
+		
 		if bloqueado {
 			fmt.Println("Comando bloqueado:", comando)
 			registrarLog("COMANDO BLOQUEADO: " + comando)
@@ -240,6 +241,7 @@ func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
 			writerS.Flush()
 			continue
 		}
+		
 		registrarLog("Comando ejecutado: " + comando)
 		shell := exec.Command("bash", "-c", comando)
 		shell.Dir = dirActual
@@ -258,6 +260,7 @@ func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
 		writerS.Flush()
 	}
 }
+
 func envReporteS(socketS *net.Conn, periodo int, salir chan bool) {
 	writerS := bufio.NewWriter(*socketS)
 	num := 0
