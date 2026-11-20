@@ -8,14 +8,49 @@ import (
 	"strings"
 )
 
-func main() {
-	if len(os.Args) < 4 {
-		fmt.Println("Uso: cliente <IP> <Puerto> <PeriodoReporte>")
-		return
+func leerConfigCliente(nombreArchivo string) (string, string, string, error) {
+	datos, err := os.ReadFile(nombreArchivo)
+	if err != nil {
+		return "", "", "", err
 	}
-	IPserver := os.Args[1]
-	puerto := os.Args[2]
-	periodo := os.Args[3]
+	var ip, puerto, periodo string
+	lineas := strings.Split(string(datos), "\n")
+	for _, linea := range lineas {
+		partes := strings.Split(strings.TrimSpace(linea), "=")
+		if len(partes) == 2 {
+			clave := strings.TrimSpace(partes[0])
+			valor := strings.TrimSpace(partes[1])
+			switch clave {
+			case "ip_servidor":
+				ip = valor
+			case "puerto":
+				puerto = valor
+			case "periodo":
+				periodo = valor
+			}
+		}
+	}
+	if ip == "" || puerto == "" || periodo == "" {
+		return "", "", "", fmt.Errorf("faltan parámetros en %s", nombreArchivo)
+	}
+	return ip, puerto, periodo, nil
+}
+
+func main() {
+	var IPserver, puerto, periodo string
+
+	if len(os.Args) >= 4 {
+		IPserver = os.Args[1]
+		puerto = os.Args[2]
+		periodo = os.Args[3]
+	} else {
+		var err error
+		IPserver, puerto, periodo, err = leerConfigCliente("cliente.conf")
+		if err != nil {
+			fmt.Println("Uso: cliente <IP> <Puerto> <PeriodoReporte> o configure cliente.conf")
+			return
+		}
+	}
 
 	fmt.Println("***********************************")
 	fmt.Println("****** Cliente Windows ************")
