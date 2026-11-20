@@ -19,7 +19,7 @@ func main() {
 	fmt.Println("*******************************")
 	registrarLog("=== INICIANDO SERVER DEBIAN ===")
 
-	ipPermitida, puerto, maxintentos, usuariospermitidos, archivousuaris := leerConfig("/etc/configProyecto.conf")
+	ipPermitida, puerto, maxintentos, usuariospermitidos, archivousuaris, prohibidos := leerConfig("/etc/configProyecto.conf")
 
 	dirTCP, _ := net.ResolveTCPAddr("tcp4", ":"+puerto)
 	oyente, err := net.ListenTCP("tcp", dirTCP)
@@ -91,7 +91,7 @@ func main() {
 
 		salir := make(chan bool)
 
-		go recMensajeS(&socketS, bufferS, salir)
+		go recMensajeS(&socketS, bufferS, salir, prohibidos)
 		go envReporteS(&socketS, periodo, salir)
 
 		<-salir
@@ -103,16 +103,19 @@ func main() {
 
 func registrarLog(mensaje string) {
 	f, err := os.OpenFile("/var/log/proyectoOper/actividad.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+
 	if err != nil {
 		return
 	}
+
 	defer f.Close()
 	fecha := time.Now().Format("2006-01-02 15:04:05")
 	f.WriteString("[" + fecha + "] " + mensaje + "\n")
 }
 
-func leerConfig(nombreArchivo string) (string, string, int, []string, string) {
+func leerConfig(nombreArchivo string) (string, string, int, []string, string, []string) {
 	datos, err := os.ReadFile(nombreArchivo)
+
 	if err != nil {
 		fmt.Println("No se pudo leer", nombreArchivo)
 		os.Exit(1)
@@ -120,6 +123,8 @@ func leerConfig(nombreArchivo string) (string, string, int, []string, string) {
 	var ip, puerto, archivousuaris string
 	var maxintentos int
 	var Usuaio []string
+	prohibidos := []string{"rm", "rmdir", "shutdown", "reboot", "poweroff", "halt", "mkfs", "dd", "sudo", "su", "passwd", "chmod", "chown", "kill", "pkill", "killall", "mv", "cp", "truncate", "shred", "tee", "wget", "curl", "nc", "ncat", "ssh", "nano", "vim", "vi", "top", "htop", "less", "more"}
+
 	lineas := strings.Split(string(datos), "\n")
 	for _, linea := range lineas {
 		partes := strings.Split(strings.TrimSpace(linea), "=")
@@ -135,10 +140,12 @@ func leerConfig(nombreArchivo string) (string, string, int, []string, string) {
 				Usuaio = strings.Split(partes[1], ",")
 			case "archivo_usuarios":
 				archivousuaris = partes[1]
+			case "comandos_prohibidos":
+				prohibidos = strings.Split(partes[1], ",")
 			}
 		}
 	}
-	return ip, puerto, maxintentos, Usuaio, archivousuaris
+	return ip, puerto, maxintentos, Usuaio, archivousuaris, prohibidos
 }
 
 func validarLogin(user string, pass string, permitidos []string, rutaDB string) bool {
@@ -176,12 +183,8 @@ func validarLogin(user string, pass string, permitidos []string, rutaDB string) 
 	return false
 }
 
-func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
+func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool, prohibidos []string) {
 	writerS := bufio.NewWriter(*socketS)
-	prohibidos := []string{
-		"rm", "rmdir", "shutdown", "reboot", "poweroff", "halt", "mkfs", "dd", "sudo", "su", "passwd", "chmod", "chown", "kill", "pkill", "killall", "mv", "cp", "truncate", "shred", "tee",
-		"wget", "curl", "nc", "ncat", "ssh", "nano", "vim", "vi", "top", "htop", "less", "more",
-	}
 	dirActual, err := os.Getwd()
 	if err != nil {
 		dirActual = "/home/mramirez"
@@ -206,13 +209,12 @@ func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
 		palabras := strings.Fields(limpio)
 		for _, pal := range palabras {
 			for _, p := range prohibidos {
-				if pal == p {
+				if pal == strings.TrimSpace(p) {
 					bloqueado = true
 					break
 				}
 			}
 		}
-		
 		if bloqueado {
 			fmt.Println("Comando bloqueado:", comando)
 			registrarLog("COMANDO BLOQUEADO: " + comando)
@@ -241,7 +243,6 @@ func recMensajeS(socketS *net.Conn, bufferS *bufio.Reader, salir chan bool) {
 			writerS.Flush()
 			continue
 		}
-		
 		registrarLog("Comando ejecutado: " + comando)
 		shell := exec.Command("bash", "-c", comando)
 		shell.Dir = dirActual
